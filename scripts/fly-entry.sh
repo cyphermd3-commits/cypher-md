@@ -23,4 +23,9 @@ if [ -d /data ]; then
   done
 fi
 
+# Write secrets from env vars to files (Fly.io doesn't have Secret Files)
+mkdir -p /etc/secrets
+[ -n "$WARP_CONF" ] && printf '%s\n' "$WARP_CONF" > /etc/secrets/warp.conf
+[ -n "$YT_COOKIES" ] && printf '%s\n' "$YT_COOKIES" > /etc/secrets/cookies.txt
+
 exec node src/server.js
