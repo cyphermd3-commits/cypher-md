@@ -21,9 +21,8 @@ WORKDIR /app
 
 COPY --from=build /app/node_modules ./node_modules
 COPY . .
-
-# data volume mount point
-RUN mkdir -p /data
+# Overlay WARP binaries (wgcf + wireproxy) — downloaded by postinstall in build stage
+COPY --from=build /app/bin ./bin
 
 EXPOSE 3000
 
