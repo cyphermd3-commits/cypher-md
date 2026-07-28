@@ -15,7 +15,8 @@ RUN npm install --ignore-scripts
 RUN node scripts/download-warp.js
 
 # Download yt-dlp directly (bypasses GitHub API rate limit)
-RUN curl -fsSL -o node_modules/youtube-dl-exec/bin/yt-dlp \
+RUN mkdir -p node_modules/youtube-dl-exec/bin && \
+    curl -fsSL -o node_modules/youtube-dl-exec/bin/yt-dlp \
     https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
     chmod +x node_modules/youtube-dl-exec/bin/yt-dlp
 
