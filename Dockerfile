@@ -3,7 +3,7 @@ FROM node:20-slim AS build
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  python3 make g++ curl \
+  python3 make g++ curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
