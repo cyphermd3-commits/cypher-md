@@ -29,6 +29,19 @@ function hasSocks5Section(content) {
   return /^\[Socks5\]\s*$/m.test(content);
 }
 
+function normalizeNewlines(text) {
+  let t = text;
+  if (!/^\[/m.test(t) && /\\n/.test(t)) {
+    console.log('[warp] config has no section headers — expanding literal \\\\n to newlines');
+    t = t.replace(/\\n/g, '\n');
+  }
+  return t;
+}
+
+function hasInterfaceSection(content) {
+  return /^\[Interface\]\s*$/m.test(content);
+}
+
 async function ensureRegistered() {
   if (fs.existsSync(WGCF_PROFILE) && fs.existsSync(WIREPROXY_CONFIG)) return;
   fs.mkdirSync(WARP_DIR, { recursive: true });
@@ -59,13 +72,19 @@ async function ensureRegistered() {
   const srcConf = [SECRETS_CONF, LOCAL_CONF].find(f => fs.existsSync(f));
   if (srcConf) {
     console.log('[warp] using pre-generated config from', srcConf);
-    const raw = fs.readFileSync(srcConf, 'utf-8');
+    let raw = fs.readFileSync(srcConf, 'utf-8');
+    raw = normalizeNewlines(raw);
     if (hasSocks5Section(raw)) {
       fs.writeFileSync(WIREPROXY_CONFIG, raw);
       console.log('[warp] config already has [Socks5] — using directly');
-    } else {
+    } else if (hasInterfaceSection(raw)) {
       fs.writeFileSync(WGCF_PROFILE, raw);
-      console.log('[warp] raw WireGuard config — will convert to wireproxy format');
+      console.log('[warp] WireGuard config — converting to wireproxy format');
+    } else {
+      console.warn('[warp] WARP_CONF missing both [Interface] and [Socks5] sections');
+      console.warn('[warp] first 200 chars:', JSON.stringify(raw.slice(0, 200)));
+      console.warn('[warp] falling back to direct yt-dlp (no proxy)');
+      return;
     }
     return;
   }
