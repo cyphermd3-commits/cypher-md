@@ -1,6 +1,7 @@
 const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const BIN_DIR = path.join(__dirname, '..', 'bin');
 const WARP_DIR = '/tmp/warp-data';
@@ -20,14 +21,29 @@ function hasBinaries() {
 const SECRETS_CONF = '/etc/secrets/warp.conf';
 const LOCAL_CONF = path.join(__dirname, '..', 'warp.conf');
 
+function readSourceConfig() {
+  return [SECRETS_CONF, LOCAL_CONF].find(f => fs.existsSync(f));
+}
+
+function hasSocks5Section(content) {
+  return /^\[Socks5\]\s*$/m.test(content);
+}
+
 async function ensureRegistered() {
-  if (fs.existsSync(WGCF_PROFILE)) return;
+  if (fs.existsSync(WGCF_PROFILE) && fs.existsSync(WIREPROXY_CONFIG)) return;
   fs.mkdirSync(WARP_DIR, { recursive: true });
 
-  const srcConf = [SECRETS_CONF, LOCAL_CONF].find(f => fs.existsSync(f));
+  const srcConf = readSourceConfig();
   if (srcConf) {
     console.log('[warp] using pre-generated WARP config from', srcConf);
-    fs.copyFileSync(srcConf, WGCF_PROFILE);
+    const raw = fs.readFileSync(srcConf, 'utf-8');
+    if (hasSocks5Section(raw)) {
+      fs.writeFileSync(WIREPROXY_CONFIG, raw);
+      console.log('[warp] config already has [Socks5] — using directly for wireproxy');
+    } else {
+      fs.writeFileSync(WGCF_PROFILE, raw);
+      console.log('[warp] raw WireGuard config — will convert to wireproxy format');
+    }
     return;
   }
 
@@ -47,10 +63,14 @@ async function ensureRegistered() {
 }
 
 function createWireproxyConfig() {
+  if (fs.existsSync(WIREPROXY_CONFIG)) return;
   const wgLines = fs.readFileSync(WGCF_PROFILE, 'utf-8');
-  const config = wgLines + `
-
-[Socks5]
+  // Strip lines that wireproxy doesn't support (e.g. MTU in some versions)
+  const filtered = wgLines.split(/\r?\n/).filter(line => {
+    const key = line.split('=')[0]?.trim().toLowerCase();
+    return !['mtu'].includes(key);
+  }).join(os.EOL);
+  const config = filtered + os.EOL + os.EOL + `[Socks5]
 BindAddress = 127.0.0.1:1080
 `;
   fs.writeFileSync(WIREPROXY_CONFIG, config);
@@ -132,7 +152,9 @@ async function start() {
     console.log('[warp] ✅ SOCKS5 proxy on', PROXY_ADDR);
   } catch (err) {
     console.error('[warp] ❌ setup failed:', err.message);
-    console.log('[warp] to use WARP, generate wgcf-profile.conf locally and upload as Render Secret File named "warp.conf"');
+    console.log('[warp] to use WARP, provide a wireproxy config file via WARP_CONF secret:');
+    console.log('[warp]   Option A — raw wgcf profile (will auto-add [Socks5])');
+    console.log('[warp]   Option B — complete wireproxy.conf (must have [Socks5] section)');
     console.log('[warp] .play will fall back to direct yt-dlp');
   }
 }
