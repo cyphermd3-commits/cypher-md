@@ -31,11 +31,21 @@ function hasSocks5Section(content) {
 
 function normalizeNewlines(text) {
   let t = text;
-  if (!/^\[/m.test(t) && /\\n/.test(t)) {
-    console.log('[warp] config has no section headers — expanding literal \\\\n to newlines');
+  if (/\\n/.test(t)) {
+    console.log('[warp] expanding literal \\\\n to newlines');
     t = t.replace(/\\n/g, '\n');
   }
   return t;
+}
+
+function expandInlineConfig(text) {
+  let t = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  if (t.includes('\n')) return t;
+  console.log('[warp] config is single-line — expanding inline section headers to multi-line');
+  const wgKeys = 'PrivateKey|Address|DNS|MTU|PublicKey|PresharedKey|AllowedIPs|Endpoint|PersistentKeepalive';
+  t = t.replace(/\s*(\[Peer\]|\[Interface\]|\[Socks5\]|\[Tunnel\])\s*/g, '\n$1\n');
+  t = t.replace(new RegExp('(\\S)\\s+(?=' + wgKeys + '\\s*=)', 'g'), '$1\n');
+  return t.trimStart();
 }
 
 function hasInterfaceSection(content) {
@@ -74,6 +84,7 @@ async function ensureRegistered() {
     console.log('[warp] using pre-generated config from', srcConf);
     let raw = fs.readFileSync(srcConf, 'utf-8');
     raw = normalizeNewlines(raw);
+    raw = expandInlineConfig(raw);
     if (hasSocks5Section(raw)) {
       fs.writeFileSync(WIREPROXY_CONFIG, raw);
       console.log('[warp] config already has [Socks5] — using directly');
