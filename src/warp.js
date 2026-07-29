@@ -33,13 +33,36 @@ async function ensureRegistered() {
   if (fs.existsSync(WGCF_PROFILE) && fs.existsSync(WIREPROXY_CONFIG)) return;
   fs.mkdirSync(WARP_DIR, { recursive: true });
 
-  const srcConf = readSourceConfig();
+  // Always try wgcf register + generate first
+  try {
+    console.log('[warp] registering with Cloudflare WARP...');
+    execFileSync(WGCF_BIN, ['register', '--accept-tos'], {
+      cwd: WARP_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 30000
+    });
+
+    console.log('[warp] generating WireGuard config...');
+    execFileSync(WGCF_BIN, ['generate'], {
+      cwd: WARP_DIR,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      timeout: 15000
+    });
+    console.log('[warp] wgcf config generated successfully');
+    return;
+  } catch (err) {
+    console.warn('[warp] wgcf generation failed:', err.message);
+    console.warn('[warp] falling back to pre-generated config...');
+  }
+
+  // Fallback: use pre-generated config from secret or local file
+  const srcConf = [SECRETS_CONF, LOCAL_CONF].find(f => fs.existsSync(f));
   if (srcConf) {
-    console.log('[warp] using pre-generated WARP config from', srcConf);
+    console.log('[warp] using pre-generated config from', srcConf);
     const raw = fs.readFileSync(srcConf, 'utf-8');
     if (hasSocks5Section(raw)) {
       fs.writeFileSync(WIREPROXY_CONFIG, raw);
-      console.log('[warp] config already has [Socks5] — using directly for wireproxy');
+      console.log('[warp] config already has [Socks5] — using directly');
     } else {
       fs.writeFileSync(WGCF_PROFILE, raw);
       console.log('[warp] raw WireGuard config — will convert to wireproxy format');
@@ -47,19 +70,7 @@ async function ensureRegistered() {
     return;
   }
 
-  console.log('[warp] registering with Cloudflare WARP...');
-  execFileSync(WGCF_BIN, ['register', '--accept-tos'], {
-    cwd: WARP_DIR,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 30000
-  });
-
-  console.log('[warp] generating WireGuard config...');
-  execFileSync(WGCF_BIN, ['generate'], {
-    cwd: WARP_DIR,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 15000
-  });
+  throw new Error('wgcf registration failed and no pre-generated config found');
 }
 
 function createWireproxyConfig() {
@@ -152,10 +163,8 @@ async function start() {
     console.log('[warp] ✅ SOCKS5 proxy on', PROXY_ADDR);
   } catch (err) {
     console.error('[warp] ❌ setup failed:', err.message);
-    console.log('[warp] to use WARP, provide a wireproxy config file via WARP_CONF secret:');
-    console.log('[warp]   Option A — raw wgcf profile (will auto-add [Socks5])');
-    console.log('[warp]   Option B — complete wireproxy.conf (must have [Socks5] section)');
     console.log('[warp] .play will fall back to direct yt-dlp');
+    console.log('[warp] to use a custom wireproxy config, set WARP_CONF secret or place warp.conf in project root');
   }
 }
 
