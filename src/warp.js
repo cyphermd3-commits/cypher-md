@@ -80,6 +80,7 @@ function startProxy() {
 
     proc.stderr.on('data', (data) => {
       const text = data.toString();
+      console.log('[warp] wireproxy:', text.trim());
       if (text.includes('Starting socks5') || text.includes('bound')) {
         clearTimeout(timeout);
         console.log('[warp] proxy ready');
@@ -87,6 +88,10 @@ function startProxy() {
         process.env.YT_PROXY = PROXY_ADDR;
         resolve();
       }
+    });
+    proc.stdout.on('data', (data) => {
+      const text = data.toString().trim();
+      if (text) console.log('[warp] wireproxy:', text);
     });
 
     proc.on('error', (err) => {
@@ -110,6 +115,11 @@ function startProxy() {
 }
 
 async function start() {
+  if (process.env.YT_PROXY) {
+    console.log('[warp] using YT_PROXY from env:', process.env.YT_PROXY);
+    return;
+  }
+
   if (!hasBinaries()) {
     console.log('[warp] binaries not found, skipping WARP proxy setup');
     return;

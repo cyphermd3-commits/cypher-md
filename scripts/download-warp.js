@@ -41,7 +41,7 @@ async function main() {
   fs.mkdirSync(BIN_DIR, { recursive: true });
 
   const wgcfVer = '2.2.31';
-  const wireproxyVer = '1.1.2';
+  const wireproxyVer = '1.1.3';
 
   const wgcfUrl = `https://github.com/ViRb3/wgcf/releases/download/v${wgcfVer}/wgcf_${wgcfVer}_${goos}_${arch}${ext}`;
   const wgcfPath = path.join(BIN_DIR, `wgcf${ext}`);
