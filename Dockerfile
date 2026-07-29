@@ -14,10 +14,10 @@ RUN npm install --ignore-scripts
 # Download WARP binaries (wgcf + wireproxy) — our postinstall
 RUN node scripts/download-warp.js
 
-# Download yt-dlp directly (bypasses GitHub API rate limit)
+# Download yt-dlp standalone Linux binary (bypasses GitHub API rate limit)
 RUN mkdir -p node_modules/youtube-dl-exec/bin && \
     curl -fsSL -o node_modules/youtube-dl-exec/bin/yt-dlp \
-    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp && \
+    https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux && \
     chmod +x node_modules/youtube-dl-exec/bin/yt-dlp
 
 FROM node:20-slim
