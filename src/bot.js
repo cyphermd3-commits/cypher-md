@@ -148,6 +148,7 @@ function createSessionState(phoneNumber) {
     antilinkWarnings: new Map(),
     antistatusEnabled: new Map(),
     antistatusCounts: new Map(),
+    antispamEnabled: new Map(),
     messageStore: new Map(),
     monitoredNumbers: new Set(),
     aiTargets: new Set(),
@@ -217,6 +218,9 @@ function loadSessionData(state) {
       if (data.antistatusCounts && typeof data.antistatusCounts === 'object') {
         for (const [k, v] of Object.entries(data.antistatusCounts)) state.antistatusCounts.set(k, v);
       }
+      if (Array.isArray(data.antispamEnabled)) {
+        for (const jid of data.antispamEnabled) state.antispamEnabled.set(jid, true);
+      }
       if (data.warnings && typeof data.warnings === 'object') {
         for (const [k, v] of Object.entries(data.warnings)) state.warnings.set(k, v);
       }
@@ -240,6 +244,7 @@ async function saveSessionData(state) {
       antilinkWarnings: Object.fromEntries(state.antilinkWarnings),
       antistatusEnabled: [...state.antistatusEnabled.keys()],
       antistatusCounts: Object.fromEntries(state.antistatusCounts),
+      antispamEnabled: [...state.antispamEnabled.keys()],
       warnings: Object.fromEntries(state.warnings),
     };
     await fsPromises.writeFile(state.dataFile, JSON.stringify(data));
@@ -398,6 +403,7 @@ const commands = {
       _s.antilinkWarnings.clear();
       _s.antistatusEnabled.clear();
       _s.antistatusCounts.clear();
+      _s.antispamEnabled.clear();
       _s.messageStore.clear();
       _s.aiTargets.clear();
       _s.aiGroups.clear();
@@ -1103,6 +1109,31 @@ const commands = {
     args: ['on|off'],
     groupAdminRequired: true,
   },
+  antispam: {
+    handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
+if (!from.endsWith('@g.us')) throw new Error('❌ Only in groups.');
+      if (!isAdmin) throw new Error('❌ Not admin.');
+      const _s = conn.state;
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'on') {
+        _s.antispamEnabled.set(from, true);
+await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
+        await saveSessionData(_s);
+        return;
+      }
+      if (sub === 'off') {
+        _s.antispamEnabled.delete(from);
+        await conn.sendMessage(from, { text: '🛡️ Anti-spam OFF.' });
+        await saveSessionData(_s);
+        return;
+      }
+      const status = _s.antispamEnabled.has(from) ? 'ON' : 'OFF';
+      await conn.sendMessage(from, { text: `🛡️ Anti-spam is ${status}.` });
+    },
+    aliases: ['aspam'],
+    args: ['on|off'],
+    groupAdminRequired: true,
+  },
   help: {
     handler: async (conn, from) => {
       const helpText = `🤖 *Welcome to CYPHER MD* 🤖\n\n` +
@@ -1184,6 +1215,9 @@ const commands = {
         `for the current group only.\n` +
         `• *.antistatus on|off* — Toggle anti-status protection. Members who tag this group ` +
         `in their WhatsApp status get 3 warnings per day; on the 3rd they are auto-kicked.\n` +
+        `• *.antispam on|off* — Toggle anti-spam rate limiting for this group. When on, ` +
+        `members sending more than 5 messages in 4 seconds get warned; after 5 strikes they ` +
+        `are auto-kicked. Always active in DM.\n` +
         `• *.tagall* / *.tag* — Mention all group members in a message. Use with a message ` +
         `to broadcast an announcement.\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
@@ -1313,7 +1347,7 @@ const commands = {
         `🏓 .ping / .p\n🕐 .time\n🔄 .reverse / .r <text>\n💬 .quote\n📝 .bio\n🖼️ .getpp [@user]\n🎭 .sticker / .s\n🖼️ .toimage / .ti\n⏱️ .runtime / .uptime\n📊 .stats\n🧹 .clearsession\n🧪 .testimg\n🎵 .play / .song <name>\n🆔 .id / .jid\n\n` +
         `🤖 *AI & MEDIA*\n👻 .ghost [num] <text>\n📸 .vv (reply to VV)\n❓ ??? (reply to VV → DM)\n👁️ .monitor / .mon <number>\n\n` +
         `🤖 *AI CHAT*\n.aichat key <groq_key>\n.aichat add <num>\n.aichat remove <num>\n.aichat list\n.aichat system <prompt>\n.aichat addgc (in group)\n\n` +
-        `🛡️ *GROUP (Admin)*\n.kick .warn .unwarn .ban .delete .mute .unmute\n.antilink on|off .antistatus on|off .tagall / .tag\n\n` +
+        `🛡️ *GROUP (Admin)*\n.kick .warn .unwarn .ban .delete .mute .unmute\n.antilink on|off .antistatus on|off .antispam on|off .tagall / .tag\n\n` +
         `_Send .help for a detailed guide_`;
       await conn.sendMessage(from, { text: menuText });
     },
@@ -1812,7 +1846,7 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
     }
 
     // Anti-spam
-    if (!msg.key?.fromMe && body && isSpamming(sender, _s)) {
+    if (!msg.key?.fromMe && body && (!isGroup || _s.antispamEnabled.has(from)) && isSpamming(sender, _s)) {
       try {
         if (!isGroup) {
           await conn.blockUser(sender, 'block');
