@@ -28,7 +28,30 @@ async function setupTables() {
       value JSONB NOT NULL,
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS bot_settings (
+      phone_number TEXT NOT NULL,
+      setting_key TEXT NOT NULL,
+      value JSONB NOT NULL,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (phone_number, setting_key)
+    );
   `);
+
+  // Migrate legacy per-number state blobs (bot_data 'state:<num>') into structured bot_settings
+  try {
+    const { rows } = await pool.query("SELECT key, value FROM bot_data WHERE key LIKE 'state:%'");
+    for (const row of rows) {
+      const number = row.key.slice('state:'.length);
+      const data = row.value;
+      if (data && typeof data === 'object') {
+        await saveBotState(number, data);
+      }
+      await pool.query('DELETE FROM bot_data WHERE key = $1', [row.key]);
+    }
+    if (rows.length) console.log(`[DB] migrated ${rows.length} legacy bot state blob(s) into bot_settings`);
+  } catch (err) {
+    console.error('[DB] bot state migration failed:', err.message);
+  }
 }
 
 async function usePostgresAuthState(phoneNumber) {
@@ -109,19 +132,46 @@ async function getStoredPhoneNumbers() {
 
 async function loadBotState(phoneNumber) {
   try {
-    const { rows } = await pool.query('SELECT value FROM bot_data WHERE key = $1', [`state:${phoneNumber}`]);
-    return rows.length ? rows[0].value : null;
+    const { rows } = await pool.query(
+      'SELECT setting_key, value FROM bot_settings WHERE phone_number = $1',
+      [phoneNumber]
+    );
+    if (!rows.length) return null;
+    const state = {};
+    for (const r of rows) state[r.setting_key] = r.value;
+    return state;
   } catch { return null; }
 }
 
 async function saveBotState(phoneNumber, data) {
+  if (!data || typeof data !== 'object') return;
+  for (const [key, value] of Object.entries(data)) {
+    await pool.query(
+      `INSERT INTO bot_settings (phone_number, setting_key, value)
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT (phone_number, setting_key)
+       DO UPDATE SET value = $3::jsonb, updated_at = NOW()`,
+      [phoneNumber, key, JSON.stringify(value)]
+    );
+  }
+}
+
+async function loadLicenses() {
+  try {
+    const { rows } = await pool.query('SELECT value FROM bot_data WHERE key = $1', ['licenses']);
+    if (!rows.length) return {};
+    return rows[0].value || {};
+  } catch { return {}; }
+}
+
+async function saveLicenses(data) {
   await pool.query(
     `INSERT INTO bot_data (key, value)
-     VALUES ($1, $2::jsonb)
+     VALUES ('licenses', $1::jsonb)
      ON CONFLICT (key)
-     DO UPDATE SET value = $2::jsonb, updated_at = NOW()`,
-    [`state:${phoneNumber}`, JSON.stringify(data)]
+     DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
+    [JSON.stringify(data)]
   );
 }
 
-module.exports = { initDb, setupTables, usePostgresAuthState, loadSettings, saveSetting, deleteAuthSession, getStoredPhoneNumbers, loadBotState, saveBotState, getPool: () => pool };
+module.exports = { initDb, setupTables, usePostgresAuthState, loadSettings, saveSetting, deleteAuthSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, getPool: () => pool };

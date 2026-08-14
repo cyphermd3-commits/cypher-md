@@ -8,7 +8,7 @@ const { startBot, connections = new Map(), sessions = new Map(), startTime, isCo
 const { pairWithWhiskey } = require('./pair');
 
 const ALLOWED_NUMBERS_FILE = path.join(__dirname, '..', 'allowed_numbers.json');
-const MAX_ALLOWED_NUMBERS = 5;
+const MAX_ALLOWED_NUMBERS = parseInt(process.env.MAX_NUMBERS, 10) || 50;
 
 function loadAllowedNumbers() {
   try {
@@ -202,11 +202,11 @@ async function main() {
         isConnecting?.delete(cleanNumber);
       }
 
-      // First-5-numbers rule: only the first 5 unique paired numbers are ever allowed
+      // Cap on total concurrently paired numbers (configurable via MAX_NUMBERS)
       const allowedNumbers = loadAllowedNumbers();
       if (!allowedNumbers.includes(cleanNumber)) {
         if (allowedNumbers.length >= MAX_ALLOWED_NUMBERS) {
-          socket.emit('error', `Only the first ${MAX_ALLOWED_NUMBERS} paired numbers are allowed. This number is not on the allowed list.`);
+          socket.emit('error', `Max ${MAX_ALLOWED_NUMBERS} paired numbers reached. Unpair one or raise MAX_NUMBERS.`);
           return;
         }
         allowedNumbers.push(cleanNumber);

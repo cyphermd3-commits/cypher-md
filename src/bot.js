@@ -136,13 +136,13 @@ const GROUP_CACHE_TTL = 30000;
 const lidToPhone = new Map();
 const pendingReveals = new Set();
 
+const normalizeJid = (jid) => { if (!jid) return ''; return jid.split(':')[0].split('@')[0].split('.')[0].replace(/[^0-9]/g, ''); };
+
 function createSessionState(phoneNumber) {
   const ownerNumber = phoneNumber.replace(/\D/g, '');
-  const dataFile = path.join(process.cwd(), `vv_data_${ownerNumber}.json`);
   const state = {
     phoneNumber,
     ownerNumber,
-    dataFile,
     warnings: new Map(),
     antilinkEnabled: new Map(),
     antilinkWarnings: new Map(),
@@ -160,11 +160,13 @@ function createSessionState(phoneNumber) {
     spamTracker: new Map(),
     totalCommandsAttempted: 0,
     totalCommandsSucceeded: 0,
+    premiumTrialUses: parseInt(process.env.PREMIUM_TRIAL_USES, 10) || 10,
+    premiumTrialUsed: 0,
+    premiumKey: '',
+    premiumExpiresAt: 0,
   };
   return state;
 }
-
-const normalizeJid = (jid) => { if (!jid) return ''; return jid.split(':')[0].split('@')[0].split('.')[0].replace(/[^0-9]/g, ''); };
 
 const resolveJid = async (jid, conn) => {
   if (!jid) return jid;
@@ -188,44 +190,50 @@ const resolveJid = async (jid, conn) => {
 
 // ── Persistence (per-number) ──
 
-function loadSessionData(state) {
+async function loadSessionData(state) {
   try {
-    if (fs.existsSync(state.dataFile)) {
-      const data = JSON.parse(fs.readFileSync(state.dataFile, 'utf-8'));
-      if (Array.isArray(data.monitoredNumbers)) {
-        for (const n of data.monitoredNumbers) state.monitoredNumbers.add(n);
-      }
-      if (Array.isArray(data.aiTargets)) {
-        for (const t of data.aiTargets) state.aiTargets.add(t);
-      }
-      if (Array.isArray(data.aiGroups)) {
-        for (const g of data.aiGroups) state.aiGroups.add(g);
-      }
-      if (data.groqApiKey) state.groqApiKey = data.groqApiKey;
-      if (data.aiSystemPrompt) state.aiSystemPrompt = data.aiSystemPrompt;
-      if (data.lidToPhone && typeof data.lidToPhone === 'object') {
-        for (const [k, v] of Object.entries(data.lidToPhone)) lidToPhone.set(k, v);
-      }
-      if (Array.isArray(data.antilinkEnabled)) {
-        for (const jid of data.antilinkEnabled) state.antilinkEnabled.set(jid, true);
-      }
-      if (data.antilinkWarnings && typeof data.antilinkWarnings === 'object') {
-        for (const [k, v] of Object.entries(data.antilinkWarnings)) state.antilinkWarnings.set(k, v);
-      }
-      if (Array.isArray(data.antistatusEnabled)) {
-        for (const jid of data.antistatusEnabled) state.antistatusEnabled.set(jid, true);
-      }
-      if (data.antistatusCounts && typeof data.antistatusCounts === 'object') {
-        for (const [k, v] of Object.entries(data.antistatusCounts)) state.antistatusCounts.set(k, v);
-      }
-      if (Array.isArray(data.antispamEnabled)) {
-        for (const jid of data.antispamEnabled) state.antispamEnabled.set(jid, true);
-      }
-      if (data.warnings && typeof data.warnings === 'object') {
-        for (const [k, v] of Object.entries(data.warnings)) state.warnings.set(k, v);
-      }
-      console.log(`[DATA] ${state.phoneNumber} loaded ${state.monitoredNumbers.size} monitored, ${state.aiTargets.size} AI targets, ${state.aiGroups.size} AI groups`);
+    const data = await storage.loadBotState(state.phoneNumber);
+    if (!data) {
+      console.log(`[DATA] ${state.phoneNumber} no persisted state`);
+      return;
     }
+    if (Array.isArray(data.monitoredNumbers)) {
+      for (const n of data.monitoredNumbers) state.monitoredNumbers.add(n);
+    }
+    if (Array.isArray(data.aiTargets)) {
+      for (const t of data.aiTargets) state.aiTargets.add(t);
+    }
+    if (Array.isArray(data.aiGroups)) {
+      for (const g of data.aiGroups) state.aiGroups.add(g);
+    }
+    if (data.groqApiKey) state.groqApiKey = data.groqApiKey;
+    if (data.aiSystemPrompt) state.aiSystemPrompt = data.aiSystemPrompt;
+    if (data.lidToPhone && typeof data.lidToPhone === 'object') {
+      for (const [k, v] of Object.entries(data.lidToPhone)) lidToPhone.set(k, v);
+    }
+    if (Array.isArray(data.antilinkEnabled)) {
+      for (const jid of data.antilinkEnabled) state.antilinkEnabled.set(jid, true);
+    }
+    if (data.antilinkWarnings && typeof data.antilinkWarnings === 'object') {
+      for (const [k, v] of Object.entries(data.antilinkWarnings)) state.antilinkWarnings.set(k, v);
+    }
+    if (Array.isArray(data.antistatusEnabled)) {
+      for (const jid of data.antistatusEnabled) state.antistatusEnabled.set(jid, true);
+    }
+    if (data.antistatusCounts && typeof data.antistatusCounts === 'object') {
+      for (const [k, v] of Object.entries(data.antistatusCounts)) state.antistatusCounts.set(k, v);
+    }
+    if (Array.isArray(data.antispamEnabled)) {
+      for (const jid of data.antispamEnabled) state.antispamEnabled.set(jid, true);
+    }
+    if (data.warnings && typeof data.warnings === 'object') {
+      for (const [k, v] of Object.entries(data.warnings)) state.warnings.set(k, v);
+    }
+    if (typeof data.premiumTrialUsed === 'number') state.premiumTrialUsed = data.premiumTrialUsed;
+    if (typeof data.premiumTrialUses === 'number') state.premiumTrialUses = data.premiumTrialUses;
+    if (typeof data.premiumKey === 'string') state.premiumKey = data.premiumKey;
+    if (typeof data.premiumExpiresAt === 'number') state.premiumExpiresAt = data.premiumExpiresAt;
+    console.log(`[DATA] ${state.phoneNumber} loaded ${state.monitoredNumbers.size} monitored, ${state.aiTargets.size} AI targets, ${state.aiGroups.size} AI groups`);
   } catch (err) {
     console.error(`[DATA] load failed for ${state.phoneNumber}:`, err.message);
   }
@@ -246,8 +254,12 @@ async function saveSessionData(state) {
       antistatusCounts: Object.fromEntries(state.antistatusCounts),
       antispamEnabled: [...state.antispamEnabled.keys()],
       warnings: Object.fromEntries(state.warnings),
+      premiumTrialUsed: state.premiumTrialUsed,
+      premiumTrialUses: state.premiumTrialUses,
+      premiumKey: state.premiumKey,
+      premiumExpiresAt: state.premiumExpiresAt,
     };
-    await fsPromises.writeFile(state.dataFile, JSON.stringify(data));
+    await storage.saveBotState(state.phoneNumber, data);
   } catch (err) {
     console.error(`[DATA] save failed for ${state.phoneNumber}:`, err.message);
   }
@@ -322,11 +334,17 @@ function scheduleReconnect(phoneNumber, socket) {
   reconnectAttempts.set(phoneNumber, attempt);
 
   if (attempt > RECONNECT_MAX_ATTEMPTS) {
-    console.log(`[RECON] ${phoneNumber} max attempts (${RECONNECT_MAX_ATTEMPTS}) reached, purging stale session`);
-    deleteAuthFolder(phoneNumber).catch(() => {});
-    reconnectAttempts.delete(phoneNumber);
-    consecutive428.delete(phoneNumber);
-    return;
+    if (scheduleReconnect.__transient) {
+      // 408/503 are temporary network issues — keep retrying, never purge the session
+      reconnectAttempts.set(phoneNumber, Math.max(RECONNECT_MAX_ATTEMPTS - 2, 1));
+      console.log(`[RECON] ${phoneNumber} hi transient error, retrying without purging`);
+    } else {
+      console.log(`[RECON] ${phoneNumber} max attempts (${RECONNECT_MAX_ATTEMPTS}) reached, purging stale session`);
+      deleteAuthFolder(phoneNumber).catch(() => {});
+      reconnectAttempts.delete(phoneNumber);
+      consecutive428.delete(phoneNumber);
+      return;
+    }
   }
 
   const lastOk = lastConnectedAt.get(phoneNumber) || 0;
@@ -617,6 +635,7 @@ const commands = {
     aliases: [],
     args: ['@user'],
     groupAdminRequired: true,
+    premium: true,
   },
   warn: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
@@ -645,6 +664,7 @@ const commands = {
     aliases: [],
     args: ['@user'],
     groupAdminRequired: true,
+    premium: true,
   },
   unwarn: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
@@ -670,6 +690,7 @@ const commands = {
     aliases: [],
     args: ['@user'],
     groupAdminRequired: true,
+    premium: true,
   },
   ban: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
@@ -690,6 +711,7 @@ const commands = {
     aliases: [],
     args: ['@user'],
     groupAdminRequired: true,
+    premium: true,
   },
   promote: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin) => {
@@ -711,6 +733,7 @@ const commands = {
     aliases: ['admin'],
     args: ['@user | number'],
     groupAdminRequired: true,
+    premium: true,
   },
   demote: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin) => {
@@ -732,6 +755,7 @@ const commands = {
     aliases: [],
     args: ['@user | number'],
     groupAdminRequired: true,
+    premium: true,
   },
   delete: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin) => {
@@ -747,6 +771,7 @@ const commands = {
     aliases: ['del'],
     args: [],
     groupAdminRequired: true,
+    premium: true,
   },
   mute: {
     handler: async (conn, from) => {
@@ -756,6 +781,7 @@ const commands = {
     aliases: [],
     args: [],
     groupAdminRequired: true,
+    premium: true,
   },
   unmute: {
     handler: async (conn, from) => {
@@ -765,6 +791,7 @@ const commands = {
     aliases: [],
     args: [],
     groupAdminRequired: true,
+    premium: true,
   },
   vv: {
     handler: async (conn, from, args, msg, sender) => {
@@ -810,6 +837,7 @@ const commands = {
     aliases: [],
     args: [],
     groupAdminRequired: false,
+    premium: true,
   },
   monitor: {
     handler: async (conn, from, args, msg, sender) => {
@@ -869,6 +897,7 @@ const commands = {
     aliases: ['mon'],
     args: ['<number> | list | remove <number> | clear'],
     groupAdminRequired: false,
+    premium: true,
   },
   aichat: {
     handler: async (conn, from, args) => {
@@ -952,6 +981,7 @@ const commands = {
     aliases: ['ai'],
     args: ['optional'],
     groupAdminRequired: false,
+    premium: true,
   },
   id: {
     handler: async (conn, from, args, msg, sender) => {
@@ -1069,6 +1099,7 @@ const commands = {
     aliases: ['al'],
     args: ['on|off|whitelist'],
     groupAdminRequired: true,
+    premium: true,
   },
   antistatus: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
@@ -1108,6 +1139,7 @@ const commands = {
     aliases: ['as'],
     args: ['on|off'],
     groupAdminRequired: true,
+    premium: true,
   },
   antispam: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
@@ -1133,6 +1165,7 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
     aliases: ['aspam'],
     args: ['on|off'],
     groupAdminRequired: true,
+    premium: true,
   },
   help: {
     handler: async (conn, from) => {
@@ -1340,6 +1373,7 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
     aliases: ['song', 'yt', 'audio'],
     args: ['<song name or URL>'],
     groupAdminRequired: false,
+    premium: true,
   },
   menu: {
     handler: async (conn, from) => {
@@ -1354,6 +1388,68 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
     aliases: ['m'],
     args: [],
     groupAdminRequired: false,
+  },
+  premium: {
+    handler: async (conn, from, args) => {
+      const _s = conn.state;
+      const sub = args[0]?.toLowerCase();
+      if (sub === 'key') {
+        const key = args.slice(1).join('').trim();
+        if (!key) throw new Error('❌ Usage: .premium key <KEY>');
+        const licenses = await storage.loadLicenses();
+        const lic = licenses[key];
+        if (!lic) throw new Error('❌ Invalid license key.');
+        if (lic.number && lic.number !== _s.phoneNumber) throw new Error('❌ This key is already in use by another number.');
+        lic.number = _s.phoneNumber;
+        await storage.saveLicenses(licenses);
+        const days = lic.days || 30;
+        _s.premiumKey = key;
+        _s.premiumExpiresAt = Date.now() + days * 86400000;
+        await saveSessionData(_s);
+        const expDate = new Date(_s.premiumExpiresAt).toLocaleString();
+        return conn.sendMessage(from, { text: `✅ *Premium active!* Valid until ${expDate} (${days} days from now). Renew monthly with a new key.` });
+      }
+      if (sub === 'status') {
+        const now = Date.now();
+        const active = !!_s.premiumKey && _s.premiumExpiresAt > now;
+        const trialLeft = Math.max(0, _s.premiumTrialUses - _s.premiumTrialUsed);
+        let licLine;
+        if (active) {
+          licLine = `• License: ✅ Active until *${new Date(_s.premiumExpiresAt).toLocaleDateString()}*\n`;
+        } else if (_s.premiumKey) {
+          licLine = `• License: ⌛ Expired\n`;
+        } else {
+          licLine = `• License: ❌ None\n`;
+        }
+        return conn.sendMessage(from, {
+          text: `💎 *Premium status*\n\n` +
+            licLine +
+            `• Free trial uses left: ${active ? '∞' : trialLeft}/${_s.premiumTrialUses}\n\n` +
+            `To unlock/renew: *.premium key <KEY>*`
+        });
+      }
+      throw new Error('❌ Usage: .premium key <KEY> | .premium status');
+    },
+    aliases: [],
+    args: ['optional'],
+    groupAdminRequired: false,
+  },
+  genkey: {
+    handler: async (conn, from, args) => {
+      const _s = conn.state;
+      if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
+      const key = args[0]?.trim();
+      if (!key) throw new Error('❌ Usage: .genkey <KEY> [days]');
+      const days = Math.max(1, parseInt(args[1], 10) || 30);
+      const licenses = await storage.loadLicenses();
+      if (licenses[key]) throw new Error('❌ Key already exists.');
+      licenses[key] = { number: null, createdAt: Date.now(), days };
+      await storage.saveLicenses(licenses);
+      return conn.sendMessage(from, { text: `✅ License key created: \`${key}\` (${days} days)` });
+    },
+    aliases: [],
+    args: ['<KEY> [days]'],
+    groupAdminRequired: false,
   }
 };
 
@@ -1361,6 +1457,23 @@ const aliasMap = new Map();
 for (const [cmdName, cmd] of Object.entries(commands)) {
   aliasMap.set(cmdName, cmdName);
   for (const alias of cmd.aliases) aliasMap.set(alias, cmdName);
+}
+
+async function assertPremiumAccess(_s, notifyJid, conn, featureName) {
+  if (_s.premiumKey && _s.premiumExpiresAt && _s.premiumExpiresAt > Date.now()) return;
+  if (_s.premiumKey) {
+    _s.premiumKey = '';
+    _s.premiumExpiresAt = 0;
+    await saveSessionData(_s);
+    throw new Error('⌛ Your *premium subscription* has expired. Renew with a new key: *.premium key <KEY>*');
+  }
+  if (_s.premiumTrialUsed >= _s.premiumTrialUses) {
+    throw new Error(`🔒 This is a *premium* feature and your ${_s.premiumTrialUses} free trial uses are exhausted.\n\nUnlock premium with a license key: *.premium key <KEY>*`);
+  }
+  _s.premiumTrialUsed++;
+  await saveSessionData(_s);
+  console.log(`[PREMIUM] ${_s.phoneNumber} trial use ${_s.premiumTrialUsed}/${_s.premiumTrialUses} for "${featureName}"`);
+  await conn.sendMessage(notifyJid, { text: `⚡ *Premium trial* — ${_s.premiumTrialUses - _s.premiumTrialUsed} free uses left. Buy a key to keep premium: *.premium key <KEY>*` });
 }
 
 async function executeCommand(conn, from, commandName, args, msg, sender, groupMeta, isAdmin, botJid) {
@@ -1372,6 +1485,9 @@ async function executeCommand(conn, from, commandName, args, msg, sender, groupM
   try {
     if (cmd.args.length > 0 && !args.length && cmd.args[0] !== 'optional') {
       throw new Error(`❌ Missing argument: ${cmd.args[0]}`);
+    }
+    if (cmd.premium) {
+      await assertPremiumAccess(_s, from, conn, commandName);
     }
     await cmd.handler(conn, from, args, msg, sender, groupMeta, isAdmin, botJid);
     _s.totalCommandsSucceeded++;
@@ -1426,7 +1542,7 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
   const sessionState = createSessionState(phoneNumber);
   sessions.set(phoneNumber, sessionState);
   conn.state = sessionState;
-  loadSessionData(sessionState);
+  loadSessionData(sessionState).catch(err => console.error('[DATA] loadSessionData failed:', err.message));
   let welcomeTimeout = null;
   let isConnected = false;
   const ownerNumber = phoneNumber.replace(/\D/g, '');
@@ -1465,6 +1581,9 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
       if (reason === 408 || reason === 503) {
         console.log(`[CONN] ${phoneNumber} ${reason} — transient stream error, reconnecting`);
         // Do not purge the session — 408/503 are temporary network issues
+        scheduleReconnect.__transient = true;
+      } else {
+        scheduleReconnect.__transient = false;
       }
       if (reason === 515) lastStream515At.set(phoneNumber, Date.now());
       if (reason === DisconnectReason.loggedOut) {
@@ -1576,12 +1695,20 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
       const isGroup = from.endsWith('@g.us');
       const sender = isGroup ? (msg.key.participant || msg.participant || from) : from;
       if ((msg.key.fromMe) || (normalizeJid(sender) === ownerNumber)) {
+        const ownerJid = ownerNumber + '@s.whatsapp.net';
+        if (!msg.key.fromMe) {
+          try {
+            await assertPremiumAccess(_s, ownerJid, conn, '???');
+          } catch (e) {
+            await conn.sendMessage(ownerJid, { text: e.message });
+            return;
+          }
+        }
         const ctx = msg.message?.extendedTextMessage?.contextInfo;
         if (ctx?.stanzaId && ctx?.quotedMessage) {
           const isVV = !!(ctx.quotedMessage?.viewOnceMessageV2 || ctx.quotedMessage?.viewOnceMessage || ctx.quotedMessage?.viewOnceMessageV2Extension
             || ctx.quotedMessage?.imageMessage || ctx.quotedMessage?.videoMessage || ctx.quotedMessage?.audioMessage);
           if (!isVV) return;
-          const ownerJid = ownerNumber + '@s.whatsapp.net';
           const quotedKey = {
             key: { remoteJid: from, id: ctx.stanzaId, participant: ctx.participant, fromMe: false },
             message: ctx.quotedMessage

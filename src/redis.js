@@ -115,13 +115,58 @@ async function getStoredPhoneNumbers() {
 
 async function loadBotState(phoneNumber) {
   try {
-    const raw = await redis.get(`bot:state:${phoneNumber}`);
-    return raw || null;
+    const keys = [];
+    let cursor = 0;
+    do {
+      const [next, batch] = await redis.scan(cursor, { match: `bot:setting:${phoneNumber}:*`, count: 100 });
+      cursor = parseInt(next);
+      keys.push(...batch);
+    } while (cursor !== 0);
+
+    if (!keys.length) {
+      // Migrate legacy single-blob key
+      const raw = await redis.get(`bot:state:${phoneNumber}`);
+      if (raw) {
+        const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (data && typeof data === 'object') {
+          await saveBotState(phoneNumber, data);
+          await redis.del(`bot:state:${phoneNumber}`);
+          console.log(`[REDIS] migrated legacy bot state for ${phoneNumber} into structured keys`);
+          return data;
+        }
+      }
+      return null;
+    }
+
+    const values = await redis.mget(...keys);
+    const state = {};
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i].replace(`bot:setting:${phoneNumber}:`, '');
+      const val = values[i];
+      state[key] = typeof val === 'string' ? JSON.parse(val) : val;
+    }
+    return state;
   } catch { return null; }
 }
 
 async function saveBotState(phoneNumber, data) {
-  await redis.set(`bot:state:${phoneNumber}`, JSON.stringify(data));
+  if (!data || typeof data !== 'object') return;
+  const pipeline = redis.pipeline();
+  for (const [key, value] of Object.entries(data)) {
+    pipeline.set(`bot:setting:${phoneNumber}:${key}`, JSON.stringify(value));
+  }
+  await pipeline.exec();
 }
 
-module.exports = { initRedis, useUpstashAuthState, loadSettings, saveSetting, deleteAuthSession, deleteContactSession, getStoredPhoneNumbers, loadBotState, saveBotState, getRedis: () => redis };
+async function loadLicenses() {
+  try {
+    const raw = await redis.get('bot:setting:licenses');
+    return raw ? JSON.parse(JSON.stringify(raw)) || {} : {};
+  } catch { return {}; }
+}
+
+async function saveLicenses(data) {
+  await redis.set('bot:setting:licenses', JSON.stringify(data));
+}
+
+module.exports = { initRedis, useUpstashAuthState, loadSettings, saveSetting, deleteAuthSession, deleteContactSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, getRedis: () => redis };

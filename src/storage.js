@@ -103,6 +103,27 @@ async function deleteContactSession(phoneNumber, targetJid) {
   return 0;
 }
 
+// ── License keys (global store) ──
+// Shape: { "KEYCODE": { number: null | "234...", createdAt: ts } }
+async function loadLicenses() {
+  if (dbType === 'upstash' || dbType === 'postgres') return impl.loadLicenses();
+  const path = require('path');
+  const fs = require('fs');
+  const file = path.join(process.cwd(), 'licenses.json');
+  try {
+    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8'));
+  } catch {}
+  return {};
+}
+
+async function saveLicenses(data) {
+  if (dbType === 'upstash' || dbType === 'postgres') return impl.saveLicenses(data);
+  const path = require('path');
+  const fs = require('fs');
+  const file = path.join(process.cwd(), 'licenses.json');
+  fs.writeFileSync(file, JSON.stringify(data));
+}
+
 async function cleanupStaleSessions(activeNumbers) {
   const set = new Set(activeNumbers);
   if (dbType === 'upstash') {
@@ -139,4 +160,6 @@ module.exports = {
   saveBotState,
   deleteContactSession,
   cleanupStaleSessions,
+  loadLicenses,
+  saveLicenses,
 };
