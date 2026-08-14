@@ -1436,11 +1436,11 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
   },
   genkey: {
     handler: async (conn, from, args) => {
-      const _s = conn.state;
-      if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
-      const key = args[0]?.trim();
-      if (!key) throw new Error('❌ Usage: .genkey <KEY> [days]');
-      const days = Math.max(1, parseInt(args[1], 10) || 30);
+      const GENKEY_PASS = 'cyphermd2006';
+      if (args[0] !== GENKEY_PASS) throw new Error('❌ Wrong password.');
+      const key = args[1]?.trim();
+      if (!key) throw new Error('❌ Usage: .genkey <PASSWORD> <KEY> [days]');
+      const days = Math.max(1, parseInt(args[2], 10) || 30);
       const licenses = await storage.loadLicenses();
       if (licenses[key]) throw new Error('❌ Key already exists.');
       licenses[key] = { number: null, createdAt: Date.now(), days };
@@ -1448,7 +1448,7 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
       return conn.sendMessage(from, { text: `✅ License key created: \`${key}\` (${days} days)` });
     },
     aliases: [],
-    args: ['<KEY> [days]'],
+    args: ['<PASSWORD> <KEY> [days]'],
     groupAdminRequired: false,
   }
 };
