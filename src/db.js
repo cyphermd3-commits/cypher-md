@@ -35,6 +35,13 @@ async function setupTables() {
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       PRIMARY KEY (phone_number, setting_key)
     );
+    CREATE TABLE IF NOT EXISTS licenses (
+      key TEXT PRIMARY KEY,
+      number TEXT,
+      days INT NOT NULL DEFAULT 30,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 
   // Migrate legacy per-number state blobs (bot_data 'state:<num>') into structured bot_settings
@@ -51,6 +58,24 @@ async function setupTables() {
     if (rows.length) console.log(`[DB] migrated ${rows.length} legacy bot state blob(s) into bot_settings`);
   } catch (err) {
     console.error('[DB] bot state migration failed:', err.message);
+  }
+
+  // Migrate legacy licenses blob (bot_data 'licenses') into the licenses table
+  try {
+    const { rows } = await pool.query("SELECT value FROM bot_data WHERE key = 'licenses'");
+    if (rows.length && rows[0].value && typeof rows[0].value === 'object') {
+      for (const [k, v] of Object.entries(rows[0].value)) {
+        await pool.query(
+          `INSERT INTO licenses (key, number, days) VALUES ($1, $2, $3)
+           ON CONFLICT (key) DO UPDATE SET number = COALESCE($2, licenses.number)`,
+          [k, v.number ?? null, v.days || 30]
+        );
+      }
+      await pool.query("DELETE FROM bot_data WHERE key = 'licenses'");
+      console.log(`[DB] migrated ${Object.keys(rows[0].value).length} license key(s) into licenses table`);
+    }
+  } catch (err) {
+    console.error('[DB] licenses migration failed:', err.message);
   }
 }
 
@@ -158,20 +183,33 @@ async function saveBotState(phoneNumber, data) {
 
 async function loadLicenses() {
   try {
-    const { rows } = await pool.query('SELECT value FROM bot_data WHERE key = $1', ['licenses']);
-    if (!rows.length) return {};
-    return rows[0].value || {};
+    const { rows } = await pool.query('SELECT key, number, days, created_at FROM licenses');
+    const out = {};
+    for (const r of rows) {
+      out[r.key] = { number: r.number, days: r.days, createdAt: r.created_at ? new Date(r.created_at).getTime() : null };
+    }
+    return out;
   } catch { return {}; }
 }
 
 async function saveLicenses(data) {
-  await pool.query(
-    `INSERT INTO bot_data (key, value)
-     VALUES ('licenses', $1::jsonb)
-     ON CONFLICT (key)
-     DO UPDATE SET value = $1::jsonb, updated_at = NOW()`,
-    [JSON.stringify(data)]
-  );
+  for (const [key, v] of Object.entries(data)) {
+    await pool.query(
+      `INSERT INTO licenses (key, number, days) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET number = COALESCE($2, licenses.number), days = $3`,
+      [key, v.number ?? null, v.days || 30]
+    );
+  }
 }
 
-module.exports = { initDb, setupTables, usePostgresAuthState, loadSettings, saveSetting, deleteAuthSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, getPool: () => pool };
+async function redeemLicense(key, phoneNumber) {
+  const { rows } = await pool.query(
+    `UPDATE licenses SET number = $2, updated_at = NOW()
+     WHERE key = $1 AND (number IS NULL OR number = $2)
+     RETURNING key, number, days`,
+    [key, phoneNumber]
+  );
+  return rows[0] || null;
+}
+
+module.exports = { initDb, setupTables, usePostgresAuthState, loadSettings, saveSetting, deleteAuthSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, redeemLicense, getPool: () => pool };

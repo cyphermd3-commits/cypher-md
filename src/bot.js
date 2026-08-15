@@ -943,10 +943,37 @@ const commands = {
         const users = [..._s.aiTargets].map(n => `• ${n}`).join('\n') || 'None';
         const groups = [..._s.aiGroups].map(j => `• ${j}`).join('\n') || 'None';
         const prompt = _s.aiSystemPrompt ? _s.aiSystemPrompt.slice(0, 60) + (_s.aiSystemPrompt.length > 60 ? '...' : '') : '(none)';
-        return conn.sendMessage(from, { text: `🎯 AI targets:\n${users}\n\n👥 AI groups:\n${groups}\n\n🧠 System prompt: ${prompt}` });
+        const members = [];
+        for (const gid of currentGroups) {
+          try {
+            const meta = await getGroupMeta(conn, gid);
+            const name = (meta?.subject || '?').slice(0, 30);
+            members.push(`${_s.aiGroups.has(gid) ? '✅' : '➕'} ${name} — ${gid}`);
+          } catch {
+            members.push(`⚠️ ${gid}`);
+          }
+        }
+        const memberList = members.length ? members.join('\n') : 'None';
+        const header = `🎯 AI targets:\n${users}\n\n👥 AI groups:\n${groups}\n\n📋 *Groups I'm in:*`;
+        const footer = `➡️ Enable from your DM: *.aichat addgc <jid>*\n\n🧠 System prompt: ${prompt}`;
+        if (members.length <= 40) {
+          return conn.sendMessage(from, { text: `${header}\n\n${memberList}\n\n${footer}` });
+        }
+        await conn.sendMessage(from, { text: `${header}\n\n${members.slice(0, 40).join('\n')}` });
+        for (let i = 40; i < members.length; i += 40) {
+          await conn.sendMessage(from, { text: members.slice(i, i + 40).join('\n') });
+        }
+        return conn.sendMessage(from, { text: footer });
       }
       if (sub === 'addgc') {
-        if (!from.endsWith('@g.us')) throw new Error('❌ Send this in the target group.');
+        const targetJid = args[1]?.trim();
+        if (targetJid) {
+          if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
+          _s.aiGroups.add(targetJid);
+          await saveSessionData(_s);
+          return conn.sendMessage(from, { text: `✅ AI replies enabled for ${targetJid}.` });
+        }
+        if (!from.endsWith('@g.us')) throw new Error('❌ Send this in the target group, or use .aichat addgc <jid> from your DM.');
         _s.aiGroups.add(from);
         await saveSessionData(_s);
         return conn.sendMessage(from, { text: `✅ AI replies enabled for this group. Tag or reply to me to chat.` });
@@ -975,8 +1002,8 @@ const commands = {
         await saveSessionData(_s);
         return conn.sendMessage(from, { text: '✅ All AI data cleared (key, targets, groups, prompt, conversations).' });
       }
-      if (sub === 'addgc') throw new Error('❌ Send .aichat addgc in the target group.');
-      throw new Error('❌ Usage: .aichat key <groq_key> | add <num> | remove <num> | list | addgc | removegc <jid> | system <prompt> | clear');
+      if (sub === 'addgc') throw new Error('❌ Send .aichat addgc in the target group, or .aichat addgc <jid> from your DM.');
+      throw new Error('❌ Usage: .aichat key <groq_key> | add <num> | remove <num> | list | addgc [jid] | removegc <jid> | system <prompt> | clear');
     },
     aliases: ['ai'],
     args: ['optional'],
@@ -1262,12 +1289,15 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
         `person sends any message, the bot will auto-reply using Groq AI.\n\n` +
         `• *.aichat remove <number>*\n  Remove a number from AI targets.\n\n` +
         `• *.aichat list*\n  Show all AI targets, AI-enabled groups, and the current ` +
-        `system prompt.\n\n` +
+        `system prompt. Also lists *every group I'm in* with its name and JID, ` +
+        `marked ✅ if AI is already enabled there.\n\n` +
         `• *.aichat system <prompt>*\n  Set a custom system prompt for the AI. ` +
         `This changes the bot's personality and behavior in all AI replies.\n\n` +
         `• *.aichat system clear*\n  Clears the custom system prompt.\n\n` +
         `• *.aichat addgc*\n  Send this in a group to enable AI replies there. ` +
         `When someone tags or replies to the bot, it will respond with Groq AI.\n\n` +
+        `• *.aichat addgc <jid>*\n  Owner-only, from your DM. Enables AI replies in a ` +
+        `group remotely without typing in it. See *.aichat list* for group names + JIDs.\n\n` +
         `• *.aichat removegc <jid>*\n  Remove a group from AI-enabled groups.\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `👻 *GHOST COMMAND*\n\n` +
@@ -1380,7 +1410,7 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
       const menuText = `*📋 CYPHER MD Commands*\n\n` +
         `🏓 .ping / .p\n🕐 .time\n🔄 .reverse / .r <text>\n💬 .quote\n📝 .bio\n🖼️ .getpp [@user]\n🎭 .sticker / .s\n🖼️ .toimage / .ti\n⏱️ .runtime / .uptime\n📊 .stats\n🧹 .clearsession\n🧪 .testimg\n🎵 .play / .song <name>\n🆔 .id / .jid\n\n` +
         `🤖 *AI & MEDIA*\n👻 .ghost [num] <text>\n📸 .vv (reply to VV)\n❓ ??? (reply to VV → DM)\n👁️ .monitor / .mon <number>\n\n` +
-        `🤖 *AI CHAT*\n.aichat key <groq_key>\n.aichat add <num>\n.aichat remove <num>\n.aichat list\n.aichat system <prompt>\n.aichat addgc (in group)\n\n` +
+        `🤖 *AI CHAT*\n.aichat key <groq_key>\n.aichat add <num>\n.aichat remove <num>\n.aichat list (shows my groups)\n.aichat system <prompt>\n.aichat addgc [jid]\n\n` +
         `🛡️ *GROUP (Admin)*\n.kick .warn .unwarn .ban .delete .mute .unmute\n.antilink on|off .antistatus on|off .antispam on|off .tagall / .tag\n\n` +
         `_Send .help for a detailed guide_`;
       await conn.sendMessage(from, { text: menuText });
@@ -1396,12 +1426,8 @@ await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
       if (sub === 'key') {
         const key = args.slice(1).join('').trim();
         if (!key) throw new Error('❌ Usage: .premium key <KEY>');
-        const licenses = await storage.loadLicenses();
-        const lic = licenses[key];
-        if (!lic) throw new Error('❌ Invalid license key.');
-        if (lic.number && lic.number !== _s.phoneNumber) throw new Error('❌ This key is already in use by another number.');
-        lic.number = _s.phoneNumber;
-        await storage.saveLicenses(licenses);
+        const lic = await storage.redeemLicense(key, _s.phoneNumber);
+        if (!lic) throw new Error('❌ Invalid license key or already in use by another number.');
         const days = lic.days || 30;
         _s.premiumKey = key;
         _s.premiumExpiresAt = Date.now() + days * 86400000;

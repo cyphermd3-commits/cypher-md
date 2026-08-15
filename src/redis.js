@@ -160,13 +160,42 @@ async function saveBotState(phoneNumber, data) {
 
 async function loadLicenses() {
   try {
-    const raw = await redis.get('bot:setting:licenses');
-    return raw ? JSON.parse(JSON.stringify(raw)) || {} : {};
+    const keys = await redis.keys('bot:setting:license:*');
+    const out = {};
+    for (const k of keys) {
+      const keyName = k.replace('bot:setting:license:', '');
+      const h = await redis.hgetall(k);
+      if (h) out[keyName] = { number: h.number || null, days: parseInt(h.days, 10) || 30, createdAt: parseInt(h.createdAt, 10) || null };
+    }
+    return out;
   } catch { return {}; }
 }
 
 async function saveLicenses(data) {
-  await redis.set('bot:setting:licenses', JSON.stringify(data));
+  for (const [key, v] of Object.entries(data)) {
+    await redis.hset(`bot:setting:license:${key}`, {
+      number: v.number || '',
+      days: v.days || 30,
+      createdAt: v.createdAt || Date.now(),
+    });
+  }
 }
 
-module.exports = { initRedis, useUpstashAuthState, loadSettings, saveSetting, deleteAuthSession, deleteContactSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, getRedis: () => redis };
+const REDEEM_LICENSE_LUA = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return nil end
+local number = redis.call('HGET', KEYS[1], 'number')
+if number and number ~= ARGV[1] then return 'taken' end
+if not number or number == '' then redis.call('HSET', KEYS[1], 'number', ARGV[1]) end
+return redis.call('HGET', KEYS[1], 'days')
+`;
+
+async function redeemLicense(key, phoneNumber) {
+  try {
+    const res = await redis.eval(REDEEM_LICENSE_LUA, [`bot:setting:license:${key}`], [phoneNumber]);
+    if (res === null || res === undefined) return null;
+    if (res === 'taken') return null;
+    return { key, number: phoneNumber, days: parseInt(res, 10) || 30 };
+  } catch { return null; }
+}
+
+module.exports = { initRedis, useUpstashAuthState, loadSettings, saveSetting, deleteAuthSession, deleteContactSession, getStoredPhoneNumbers, loadBotState, saveBotState, loadLicenses, saveLicenses, redeemLicense, getRedis: () => redis };

@@ -124,6 +124,22 @@ async function saveLicenses(data) {
   fs.writeFileSync(file, JSON.stringify(data));
 }
 
+async function redeemLicense(key, phoneNumber) {
+  if (dbType === 'upstash' || dbType === 'postgres') return impl.redeemLicense(key, phoneNumber);
+  const path = require('path');
+  const fs = require('fs');
+  const file = path.join(process.cwd(), 'licenses.json');
+  try {
+    const data = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf-8')) : {};
+    const lic = data[key];
+    if (!lic) return null;
+    if (lic.number && lic.number !== phoneNumber) return null;
+    lic.number = phoneNumber;
+    fs.writeFileSync(file, JSON.stringify(data));
+    return { key, number: phoneNumber, days: lic.days || 30 };
+  } catch { return null; }
+}
+
 async function cleanupStaleSessions(activeNumbers) {
   const set = new Set(activeNumbers);
   if (dbType === 'upstash') {
@@ -162,4 +178,5 @@ module.exports = {
   cleanupStaleSessions,
   loadLicenses,
   saveLicenses,
+  redeemLicense,
 };
