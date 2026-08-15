@@ -283,6 +283,31 @@ const getGroupMeta = async (conn, groupId) => {
   return metadata;
 };
 
+const resolveGroupCmd = async (conn, from, args, _s) => {
+  const sub = args[0]?.toLowerCase();
+  let target = from;
+  let replyTo = from;
+  let remote = false;
+  let meta = null;
+  const last = args[args.length - 1];
+  const hasJid = typeof last === 'string' && (last.endsWith('@g.us') || last.endsWith('@lid'));
+  if (!from.endsWith('@g.us')) {
+    if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only. Send this in the group, or run it from your DM with a group JID.');
+    if (!hasJid) throw new Error('❌ Missing group JID. Usage: <cmd> <on|off> <group-jid>');
+    target = args.pop();
+    replyTo = from;
+    remote = true;
+    try {
+      meta = await getGroupMeta(conn, target);
+    } catch {
+      throw new Error('❌ I am not in that group.');
+    }
+  } else if (hasJid) {
+    args.pop();
+  }
+  return { sub, target, replyTo, remote, meta };
+};
+
 const hasLink = (text) => {
   if (!text) return false;
   const lower = text.toLowerCase();
@@ -1083,26 +1108,26 @@ const commands = {
   },
   antilink: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
-      if (!from.endsWith('@g.us')) throw new Error('❌ Only in groups.');
-      if (!isAdmin) throw new Error('❌ Not admin.');
       const _s = conn.state;
-      const isBotAdmin = groupMeta?.participants?.some(p => {
+      const { sub, target, replyTo, remote, meta } = await resolveGroupCmd(conn, from, args, _s);
+      if (!remote && !isAdmin) throw new Error('❌ Not admin.');
+      const gm = meta || groupMeta;
+      const isBotAdmin = gm?.participants?.some(p => {
         if (!p.admin) return false;
         const botPn = conn.user?.id || '';
         const botLid = conn.user?.lid || null;
         return areJidsSameUser(p.id, botPn) || (botLid && areJidsSameUser(p.id, botLid));
       });
       if (!isBotAdmin) throw new Error('❌ I must be admin.');
-      const sub = args[0]?.toLowerCase();
       if (sub === 'on') {
-        _s.antilinkEnabled.set(from, true);
-        await conn.sendMessage(from, { text: '🛡️ Anti-link ON.' });
+        _s.antilinkEnabled.set(target, true);
+        await conn.sendMessage(replyTo, { text: '🛡️ Anti-link ON.' });
         return;
       }
       if (sub === 'off') {
-        _s.antilinkEnabled.delete(from);
-        _s.antilinkWarnings.delete(from);
-        await conn.sendMessage(from, { text: '🛡️ Anti-link OFF.' });
+        _s.antilinkEnabled.delete(target);
+        _s.antilinkWarnings.delete(target);
+        await conn.sendMessage(replyTo, { text: '🛡️ Anti-link OFF.' });
         return;
       }
       if (sub === 'whitelist') {
@@ -1110,18 +1135,18 @@ const commands = {
         const domain = args[2]?.toLowerCase();
         if (action === 'add' && domain) {
           linkWhitelist.add(domain);
-          await conn.sendMessage(from, { text: `✅ Added ${domain}.` });
+          await conn.sendMessage(replyTo, { text: `✅ Added ${domain}.` });
         } else if (action === 'remove' && domain) {
           linkWhitelist.delete(domain);
-          await conn.sendMessage(from, { text: `✅ Removed ${domain}.` });
+          await conn.sendMessage(replyTo, { text: `✅ Removed ${domain}.` });
         } else {
           const list = [...linkWhitelist].join('\n• ');
-          await conn.sendMessage(from, { text: `📋 Whitelisted:\n• ${list}` });
+          await conn.sendMessage(replyTo, { text: `📋 Whitelisted:\n• ${list}` });
         }
         return;
       }
-      const status = _s.antilinkEnabled.has(from) ? 'ON' : 'OFF';
-      await conn.sendMessage(from, { text: `🛡️ Anti-link is ${status}.` });
+      const status = _s.antilinkEnabled.has(target) ? 'ON' : 'OFF';
+      await conn.sendMessage(replyTo, { text: `🛡️ Anti-link is ${status}.` });
     },
     aliases: ['al'],
     args: ['on|off|whitelist'],
@@ -1130,16 +1155,13 @@ const commands = {
   },
   antistatus: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
-      if (!from.endsWith('@g.us')) throw new Error('❌ Only in groups.');
-      if (!isAdmin) throw new Error('❌ Not admin.');
       const _s = conn.state;
-      const meta = groupMeta || await getGroupMeta(conn, from);
-      const participants = meta.participants.filter(p => !areJidsSameUser(p.id, botJid) && !p.admin);
-      const allJids = participants.map(p => p.id);
-      const sub = args[0]?.toLowerCase();
+      const { sub, target, replyTo, remote, meta } = await resolveGroupCmd(conn, from, args, _s);
+      if (!remote && !isAdmin) throw new Error('❌ Not admin.');
+      const gm = meta || groupMeta || await getGroupMeta(conn, target);
       if (sub === 'on') {
-        _s.antistatusEnabled.set(from, true);
-        await conn.sendMessage(from, {
+        _s.antistatusEnabled.set(target, true);
+        await conn.sendMessage(replyTo, {
           text: `🚫 *ANTI-STATUS ACTIVATED*\n\n` +
             `From now on, each member may tag this group in their status only 3 times per day.\n` +
             `On the 3rd violation, the member will be automatically removed from the group.\n` +
@@ -1147,47 +1169,45 @@ const commands = {
             `• Tagging this group in your status counts as 1 violation.\n` +
             `• After 3 violations in one day → you are kicked.\n` +
             `• The counter resets daily.\n\n` +
-            `Be responsible. 🙏`,
-          mentions: allJids
+            `Be responsible. 🙏`
         });
         await saveSessionData(_s);
         return;
       }
       if (sub === 'off') {
-        _s.antistatusEnabled.delete(from);
+        _s.antistatusEnabled.delete(target);
         _s.antistatusCounts.clear();
-        await conn.sendMessage(from, { text: '🚫 Anti-status OFF.' });
+        await conn.sendMessage(replyTo, { text: '🚫 Anti-status OFF.' });
         await saveSessionData(_s);
         return;
       }
-      const status = _s.antistatusEnabled.has(from) ? 'ON' : 'OFF';
-      await conn.sendMessage(from, { text: `🚫 Anti-status is ${status}.` });
+      const status = _s.antistatusEnabled.has(target) ? 'ON' : 'OFF';
+      await conn.sendMessage(replyTo, { text: `🚫 Anti-status is ${status}.` });
     },
     aliases: ['as'],
     args: ['on|off'],
     groupAdminRequired: true,
     premium: true,
   },
-  antispam: {
+antispam: {
     handler: async (conn, from, args, msg, sender, groupMeta, isAdmin, botJid) => {
-if (!from.endsWith('@g.us')) throw new Error('❌ Only in groups.');
-      if (!isAdmin) throw new Error('❌ Not admin.');
       const _s = conn.state;
-      const sub = args[0]?.toLowerCase();
+      const { sub, target, replyTo, remote } = await resolveGroupCmd(conn, from, args, _s);
+      if (!remote && !isAdmin) throw new Error('❌ Not admin.');
       if (sub === 'on') {
-        _s.antispamEnabled.set(from, true);
-await conn.sendMessage(from, { text: '🛡️ Anti-spam ON.' });
+        _s.antispamEnabled.set(target, true);
+        await conn.sendMessage(replyTo, { text: '🛡️ Anti-spam ON.' });
         await saveSessionData(_s);
         return;
       }
       if (sub === 'off') {
-        _s.antispamEnabled.delete(from);
-        await conn.sendMessage(from, { text: '🛡️ Anti-spam OFF.' });
+        _s.antispamEnabled.delete(target);
+        await conn.sendMessage(replyTo, { text: '🛡️ Anti-spam OFF.' });
         await saveSessionData(_s);
         return;
       }
-      const status = _s.antispamEnabled.has(from) ? 'ON' : 'OFF';
-      await conn.sendMessage(from, { text: `🛡️ Anti-spam is ${status}.` });
+      const status = _s.antispamEnabled.has(target) ? 'ON' : 'OFF';
+      await conn.sendMessage(replyTo, { text: `🛡️ Anti-spam is ${status}.` });
     },
     aliases: ['aspam'],
     args: ['on|off'],
