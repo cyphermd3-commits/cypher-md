@@ -138,6 +138,12 @@ const pendingReveals = new Set();
 
 const normalizeJid = (jid) => { if (!jid) return ''; return jid.split(':')[0].split('@')[0].split('.')[0].replace(/[^0-9]/g, ''); };
 
+const isOwnerChat = (from, conn, _s) => {
+  if (normalizeJid(from) === _s.ownerNumber) return true;
+  if (conn?.user?.lid && areJidsSameUser(from, conn.user.lid)) return true;
+  return false;
+};
+
 function createSessionState(phoneNumber) {
   const ownerNumber = phoneNumber.replace(/\D/g, '');
   const state = {
@@ -292,7 +298,7 @@ const resolveGroupCmd = async (conn, from, args, _s) => {
   const last = args[args.length - 1];
   const hasJid = typeof last === 'string' && (last.endsWith('@g.us') || last.endsWith('@lid'));
   if (!from.endsWith('@g.us')) {
-    if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only. Send this in the group, or run it from your DM with a group JID.');
+    if (!isOwnerChat(from, conn, _s)) throw new Error('❌ Owner only. Send this in the group, or run it from your DM with a group JID.');
     if (!hasJid) throw new Error('❌ Missing group JID. Usage: <cmd> <on|off> <group-jid>');
     target = args.pop();
     replyTo = from;
@@ -975,7 +981,7 @@ const commands = {
       if (sub === 'addgc') {
         const targetJid = args[1]?.trim();
         if (targetJid) {
-          if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
+          if (!isOwnerChat(from, conn, _s)) throw new Error('❌ Owner only.');
           _s.aiGroups.add(targetJid);
           await saveSessionData(_s);
           return conn.sendMessage(from, { text: `✅ AI replies enabled for ${targetJid}.` });
@@ -1020,7 +1026,7 @@ const commands = {
   listgc: {
     handler: async (conn, from) => {
       const _s = conn.state;
-      if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
+      if (!isOwnerChat(from, conn, _s)) throw new Error('❌ Owner only.');
       const groups = await conn.groupFetchAllParticipating();
       const ids = Object.keys(groups || {});
       if (!ids.length) throw new Error('❌ I am in no groups.');
