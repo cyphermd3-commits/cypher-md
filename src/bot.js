@@ -1051,6 +1051,30 @@ const commands = {
     args: [],
     groupAdminRequired: false,
   },
+  img: {
+    handler: async (conn, from, args) => {
+      if (!args.length) throw new Error('❌ Usage: .img <prompt>');
+      const prompt = args.join(' ').trim();
+      await conn.sendMessage(from, { text: `🎨 Generating *${prompt.slice(0, 40)}*...` });
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 100000)}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 90000);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(`API ${res.status}`);
+        const buffer = Buffer.from(await res.arrayBuffer());
+        if (!buffer.length) throw new Error('Empty image');
+        await conn.sendMessage(from, { image: buffer, caption: `🎨 ${prompt}` });
+      } catch (e) {
+        throw new Error(`❌ Image generation failed: ${e.message}`);
+      }
+    },
+    aliases: ['aiimg', 'draw', 'gen'],
+    args: ['<prompt>'],
+    groupAdminRequired: false,
+    premium: true,
+  },
   id: {
     handler: async (conn, from, args, msg, sender) => {
       const ctx = msg.message?.extendedTextMessage?.contextInfo;
@@ -1334,6 +1358,8 @@ antispam: {
         `When someone tags or replies to the bot, it will respond with Groq AI.\n\n` +
         `• *.aichat addgc <jid>*\n  Owner-only, from your DM. Enables AI replies in a ` +
         `group remotely without typing in it. See *.aichat list* for group names + JIDs.\n\n` +
+        `• *.img <prompt>*\n  Generates an AI image from a text description (free, ` +
+        `no API key needed). Example: *.img a neon city at night, cyberpunk*.\n\n` +
         `• *.aichat removegc <jid>*\n  Remove a group from AI-enabled groups.\n\n` +
         `━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n` +
         `👻 *GHOST COMMAND*\n\n` +
@@ -1445,7 +1471,7 @@ antispam: {
     handler: async (conn, from) => {
       const menuText = `*📋 CYPHER MD Commands*\n\n` +
         `🏓 .ping / .p\n🕐 .time\n🔄 .reverse / .r <text>\n💬 .quote\n📝 .bio\n🖼️ .getpp [@user]\n🎭 .sticker / .s\n🖼️ .toimage / .ti\n⏱️ .runtime / .uptime\n📊 .stats\n🧹 .clearsession\n🧪 .testimg\n🎵 .play / .song <name>\n🆔 .id / .jid\n\n` +
-        `🤖 *AI & MEDIA*\n👻 .ghost [num] <text>\n📸 .vv (reply to VV)\n❓ ??? (reply to VV → DM)\n👁️ .monitor / .mon <number>\n\n` +
+        `🤖 *AI & MEDIA*\n👻 .ghost [num] <text>\n📸 .vv (reply to VV)\n❓ ??? (reply to VV → DM)\n👁️ .monitor / .mon <number>\n🎨 .img <prompt>\n\n` +
         `🤖 *AI CHAT*\n.aichat key <groq_key>\n.aichat add <num>\n.aichat remove <num>\n.aichat list (shows my groups)\n.aichat system <prompt>\n.aichat addgc [jid]\n\n` +
         `🛡️ *GROUP (Admin)*\n.kick .warn .unwarn .ban .delete .mute .unmute\n.antilink on|off .antistatus on|off .antispam on|off .tagall / .tag\n\n` +
         `_Send .help for a detailed guide_`;
