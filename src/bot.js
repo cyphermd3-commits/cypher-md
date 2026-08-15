@@ -123,6 +123,7 @@ const reconnectTimers = new Map();
 const isConnecting = new Map();
 const consecutive428 = new Map();
 const lastStream515At = new Map();
+let gcCache = null;
 const userGroups = new Set();
 const currentGroups = new Set();
 // Anti-link & anti-spam
@@ -1027,7 +1028,13 @@ const commands = {
     handler: async (conn, from) => {
       const _s = conn.state;
       if (!isOwnerChat(from, conn, _s)) throw new Error('❌ Owner only.');
-      const groups = await conn.groupFetchAllParticipating();
+      let groups;
+      if (gcCache && Date.now() - gcCache.ts < 5 * 60 * 1000) {
+        groups = gcCache.groups;
+      } else {
+        groups = await conn.groupFetchAllParticipating();
+        gcCache = { ts: Date.now(), groups };
+      }
       const ids = Object.keys(groups || {});
       if (!ids.length) throw new Error('❌ I am in no groups.');
       const lines = ids.map(jid => `• ${(groups[jid].subject || '?').slice(0, 40)} — ${jid}`);
