@@ -58,7 +58,7 @@ function requireAdmin(req, res, next) {
 
 async function main() {
   await storage.initBackend();
-  if (warp.hasBinaries()) await warp.start().catch(() => {});
+  if (!process.env.DISABLE_WARP && warp.hasBinaries()) await warp.start().catch(() => {});
 
   // ─── Auto-restore saved sessions (up to MAX_ALLOWED_NUMBERS) ───
   const preAllowed = loadAllowedNumbers();

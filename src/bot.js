@@ -968,27 +968,9 @@ const commands = {
         const users = [..._s.aiTargets].map(n => `• ${n}`).join('\n') || 'None';
         const groups = [..._s.aiGroups].map(j => `• ${j}`).join('\n') || 'None';
         const prompt = _s.aiSystemPrompt ? _s.aiSystemPrompt.slice(0, 60) + (_s.aiSystemPrompt.length > 60 ? '...' : '') : '(none)';
-        const members = [];
-        for (const gid of currentGroups) {
-          try {
-            const meta = await getGroupMeta(conn, gid);
-            const name = (meta?.subject || '?').slice(0, 30);
-            members.push(`${_s.aiGroups.has(gid) ? '✅' : '➕'} ${name} — ${gid}`);
-          } catch {
-            members.push(`⚠️ ${gid}`);
-          }
-        }
-        const memberList = members.length ? members.join('\n') : 'None';
-        const header = `🎯 AI targets:\n${users}\n\n👥 AI groups:\n${groups}\n\n📋 *Groups I'm in:*`;
-        const footer = `➡️ Enable from your DM: *.aichat addgc <jid>*\n\n🧠 System prompt: ${prompt}`;
-        if (members.length <= 40) {
-          return conn.sendMessage(from, { text: `${header}\n\n${memberList}\n\n${footer}` });
-        }
-        await conn.sendMessage(from, { text: `${header}\n\n${members.slice(0, 40).join('\n')}` });
-        for (let i = 40; i < members.length; i += 40) {
-          await conn.sendMessage(from, { text: members.slice(i, i + 40).join('\n') });
-        }
-        return conn.sendMessage(from, { text: footer });
+        return conn.sendMessage(from, {
+          text: `🎯 AI targets:\n${users}\n\n👥 AI groups:\n${groups}\n\n🧠 System prompt: ${prompt}\n\n📋 All groups: *.listgc*`
+        });
       }
       if (sub === 'addgc') {
         const targetJid = args[1]?.trim();
@@ -1034,6 +1016,27 @@ const commands = {
     args: ['optional'],
     groupAdminRequired: false,
     premium: true,
+  },
+  listgc: {
+    handler: async (conn, from) => {
+      const _s = conn.state;
+      if (normalizeJid(from) !== _s.ownerNumber) throw new Error('❌ Owner only.');
+      const groups = await conn.groupFetchAllParticipating();
+      const ids = Object.keys(groups || {});
+      if (!ids.length) throw new Error('❌ I am in no groups.');
+      const lines = ids.map(jid => `• ${(groups[jid].subject || '?').slice(0, 40)} — ${jid}`);
+      const header = `📋 *All groups I'm in (${ids.length}):*`;
+      if (lines.length <= 40) {
+        return conn.sendMessage(from, { text: `${header}\n\n${lines.join('\n')}` });
+      }
+      await conn.sendMessage(from, { text: `${header}\n\n${lines.slice(0, 40).join('\n')}` });
+      for (let i = 40; i < lines.length; i += 40) {
+        await conn.sendMessage(from, { text: lines.slice(i, i + 40).join('\n') });
+      }
+    },
+    aliases: ['lgc'],
+    args: [],
+    groupAdminRequired: false,
   },
   id: {
     handler: async (conn, from, args, msg, sender) => {
@@ -1689,6 +1692,7 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
   conn.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages[0];
     if (!msg?.key) return;
+    console.log(`[MSG] type=${type} id=${msg.key.id} from=${msg.key.remoteJid} fromMe=${msg.key.fromMe}`);
     const _s = conn.state;
 
     // ── Fast path: owner commands (no checks) ──
