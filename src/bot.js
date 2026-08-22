@@ -98,6 +98,7 @@ const fs = require('fs');
 const fsPromises = require('fs').promises;
 const os = require('os');
 const sharp = require('sharp');
+const MENU_BANNER = path.join(__dirname, '..', 'assets', 'banner.jpg');
 const { YOUTUBE_DL_PATH } = require('youtube-dl-exec/src/constants');
 
 const ytDlpPath = process.env.YT_DLP_PATH || YOUTUBE_DL_PATH;
@@ -1381,7 +1382,7 @@ antispam: {
         `I hope I serve you well. If you encounter any issues or have feature requests, ` +
         `please reach out to my creator, *CYPHER.DEV*. Enjoy the ride! 🚀\n\n` +
         `*— >CYPHER MD, built by CYPHER.DEV*`;
-      await conn.sendMessage(from, { text: helpText });
+      await conn.sendMessage(from, { image: { url: MENU_BANNER }, caption: helpText });
     },
     aliases: ['h'],
     args: [],
@@ -1475,7 +1476,7 @@ antispam: {
         `🤖 *AI CHAT*\n.aichat key <groq_key>\n.aichat add <num>\n.aichat remove <num>\n.aichat list (shows my groups)\n.aichat system <prompt>\n.aichat addgc [jid]\n\n` +
         `🛡️ *GROUP (Admin)*\n.kick .warn .unwarn .ban .delete .mute .unmute\n.antilink on|off .antistatus on|off .antispam on|off .tagall / .tag\n\n` +
         `_Send .help for a detailed guide_`;
-      await conn.sendMessage(from, { text: menuText });
+      await conn.sendMessage(from, { image: { url: MENU_BANNER }, caption: menuText });
     },
     aliases: ['m'],
     args: [],
