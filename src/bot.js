@@ -267,7 +267,10 @@ async function saveSessionData(state) {
       premiumKey: state.premiumKey,
       premiumExpiresAt: state.premiumExpiresAt,
     };
+    const _saveT0 = Date.now();
     await storage.saveBotState(state.phoneNumber, data);
+    const _saveMs = Date.now() - _saveT0;
+    if (_saveMs > 300) console.log(`[DATA] slow save for ${state.phoneNumber}: ${_saveMs}ms`);
   } catch (err) {
     console.error(`[DATA] save failed for ${state.phoneNumber}:`, err.message);
   }
@@ -1732,7 +1735,7 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
   conn.ev.on('messages.upsert', async ({ messages, type }) => {
     const msg = messages[0];
     if (!msg?.key) return;
-    console.log(`[MSG] type=${type} id=${msg.key.id} from=${msg.key.remoteJid} fromMe=${msg.key.fromMe}`);
+    console.log(`[MSG] type=${type} id=${msg.key.id} from=${msg.key.remoteJid} fromMe=${msg.key.fromMe} recvLag=${Date.now() - Number(msg.messageTimestamp) * 1000}ms`);
     const _s = conn.state;
 
     // ── Fast path: owner commands (no checks) ──
@@ -1771,7 +1774,9 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
               return;
             }
           }
+          const _cmdT0 = Date.now();
           await executeCommand(conn, from, cmdName, args, msg, sender, groupMeta, isUserAdmin, botJid);
+          console.log(`[CMD] "${cmdName}" finished in ${Date.now() - _cmdT0}ms`);
           return;
         }
         console.log(`[CMD] Unknown command "${rawCmd}"`);
@@ -1909,7 +1914,7 @@ async function startBot(phoneNumber, socket, _useDbIgnored, preloadedState, prel
         const botLid = conn.user?.lid ? normalizeJid(conn.user.lid) : null;
         shouldAI = mentioned.some(j => normalizeJid(j) === botNorm || (botLid && normalizeJid(j) === botLid)) || normalizeJid(ctx?.participant) === botNorm || (botLid && normalizeJid(ctx?.participant) === botLid);
       }
-      if (!shouldAI && sender.endsWith('@lid') && !lidToPhone.has(norm)) {
+      if (!shouldAI && sender.endsWith('@lid') && !lidToPhone.has(norm) && _s.aiTargets.size > 0) {
         try {
           const ids = await conn.findUserId(sender);
           if (ids?.phoneNumber) {
